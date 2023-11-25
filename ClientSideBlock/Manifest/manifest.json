@@ -1,0 +1,10 @@
+{
+	"name": "ClientSideBlock",
+	"description": "Makes the blocker determine if a bullet was blocked or not",
+	"version_number": "#VERSION#",
+	"dependencies": [
+		"BepInEx-BepInExPack_ROUNDS-5.4.1100",
+		"willis81808-UnboundLib-3.2.10"
+	],
+	"website_url": "https://github.com/olavim/RoundsClientSideBlock"
+}
