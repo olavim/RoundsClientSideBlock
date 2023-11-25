@@ -40,7 +40,7 @@ New-Item -Type Directory -Path $tempDir -Force | Out-Null
 New-Item -Type Directory -Path "$tempDir\plugins" -Force | Out-Null
 
 Copy-Item -Path "$TargetPath\*" -Destination "$tempDir\plugins\" -Recurse
-Copy-Item -Path "$ProjectPath\README.md" -Destination "$tempDir\README.md"
+Copy-Item -Path "$SolutionPath\README.md" -Destination "$tempDir\README.md"
 Copy-Item -Path "$ProjectPath\Manifest\manifest.json" -Destination "$tempDir\manifest.json"
 Copy-Item -Path "$ProjectPath\Manifest\icon.png" -Destination "$tempDir\icon.png"
 

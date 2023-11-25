@@ -1,6 +1,6 @@
 # Client side block
 
-Makes the blocker determine if a projectile was blocked or not.
+Makes the blocker determine if a bullet was blocked or not.
 
 ## Description
 
