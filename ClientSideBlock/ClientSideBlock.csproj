@@ -2,7 +2,7 @@
 	<Import Project="..\RoundsReferences.props" />
 
 	<PropertyGroup>
-		<Version>1.0.1</Version>
+		<Version>1.0.2</Version>
 		<TargetFramework>net472</TargetFramework>
 		<AssemblyName>ClientSideBlock</AssemblyName>
 	</PropertyGroup>
