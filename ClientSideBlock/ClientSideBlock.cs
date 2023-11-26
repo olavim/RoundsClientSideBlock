@@ -30,7 +30,7 @@ namespace ClientSideBlock
 	}
 
 	[HarmonyPatch(typeof(ProjectileHit))]
-	static class ProjectileHitPatch
+	internal static class ProjectileHitPatch
 	{
 		private class ProjectileHitExtraData
 		{
@@ -42,19 +42,35 @@ namespace ClientSideBlock
 
 		[HarmonyPatch("Hit")]
 		[HarmonyPrefix]
-		static bool HitPrefix(ProjectileHit __instance, MoveTransform ___move, List<HealthHandler> ___playersHit, HitInfo hit, bool forceCall)
+		private static bool HitPrefix(ProjectileHit __instance, MoveTransform ___move, List<HealthHandler> ___playersHit, HitInfo hit, bool forceCall)
 		{
-			if (!s_extraData.GetOrCreateValue(__instance).HitPending)
+			var hitData = s_extraData.GetOrCreateValue(__instance);
+			if (!hitData.HitPending)
 			{
-				s_extraData.GetOrCreateValue(__instance).HitPending = true;
+				hitData.HitPending = true;
 				ClientSideBlock.Instance.StartCoroutine(HitCoroutine(__instance, ___move, ___playersHit, hit, forceCall));
 			}
 
 			return false;
 		}
 
-		static IEnumerator HitCoroutine(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
+		private static IEnumerator HitCoroutine(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
 		{
+			yield return DoHit(hit, move, playersHit, hitInfo, forceCall);
+			s_extraData.GetOrCreateValue(hit).HitPending = false;
+		}
+
+		private static IEnumerator DoHit(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
+		{
+			var healthHandler = hitInfo.transform?.GetComponent<HealthHandler>();
+			if (healthHandler && playersHit.Contains(healthHandler))
+			{
+				yield break;
+			}
+
+			bool wasBlocked = false;
+			var hitVelocity = (Vector2) move.velocity;
+
 			int targetViewID = hitInfo.transform?.root.GetComponent<PhotonView>()?.ViewID ?? -1;
 			int targetColliderIdx = -1;
 
@@ -64,58 +80,47 @@ namespace ClientSideBlock
 				targetColliderIdx = Array.FindIndex(colliders, c => c == hitInfo.collider);
 			}
 
-			bool wasBlocked = false;
-			var hitVelocity = (Vector2) move.velocity;
-			var healthHandler = hitInfo.transform?.GetComponent<HealthHandler>();
-
-			IEnumerator DoHit()
+			if (healthHandler)
 			{
-				if (healthHandler)
+				if (hit.view.IsMine)
 				{
-					if (playersHit.Contains(healthHandler))
-					{
-						yield break;
-					}
-
-					if (hit.view.IsMine)
-					{
-						yield return GetTargetBlocked(hit, targetViewID);
-						wasBlocked = s_isBlocking[targetViewID];
-					}
-
-					hit.AddPlayerToHeld(healthHandler);
+					yield return GetTargetBlocked(hit, targetViewID);
+					wasBlocked = s_isBlocking[targetViewID];
 				}
 
-				if (hit.view.IsMine || forceCall)
-				{
-					if (hit.sendCollisions)
-					{
-						hit.view.RPC("RPCA_DoHit", RpcTarget.All, new object[]
-						{
-							hitInfo.point,
-							hitInfo.normal,
-							hitVelocity,
-							targetViewID,
-							targetColliderIdx,
-							wasBlocked
-						});
-					}
-					else
-					{
-						hit.RPCA_DoHit(hitInfo.point, hitInfo.normal, hitVelocity, targetViewID, targetColliderIdx, wasBlocked);
-					}
-				}
+				hit.AddPlayerToHeld(healthHandler);
 			}
 
-			yield return DoHit();
-			s_extraData.GetOrCreateValue(hit).HitPending = false;
+			if (!hit.view.IsMine && !forceCall)
+			{
+				yield break;
+			}
+
+			if (hit.sendCollisions)
+			{
+				hit.view.RPC("RPCA_DoHit", RpcTarget.All, new object[]
+				{
+						hitInfo.point,
+						hitInfo.normal,
+						hitVelocity,
+						targetViewID,
+						targetColliderIdx,
+						wasBlocked
+				});
+				PhotonNetwork.SendAllOutgoingCommands();
+				yield break;
+			}
+
+			hit.RPCA_DoHit(hitInfo.point, hitInfo.normal, hitVelocity, targetViewID, targetColliderIdx, wasBlocked);
 		}
 
-		static IEnumerator GetTargetBlocked(ProjectileHit hit, int targetViewID)
+		private static IEnumerator GetTargetBlocked(ProjectileHit hit, int targetViewID)
 		{
 			hit.gameObject.SetActive(false);
 			s_isBlockingAnswered[targetViewID] = false;
+
 			NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AskIsBlocking), hit.view.ViewID, targetViewID);
+			PhotonNetwork.SendAllOutgoingCommands();
 
 			while (!s_isBlockingAnswered[targetViewID])
 			{
@@ -126,21 +131,21 @@ namespace ClientSideBlock
 		}
 
 		[UnboundRPC]
-		static void RPC_AskIsBlocking(int askerID, int viewID)
+		private static void RPC_AskIsBlocking(int askerID, int viewID)
 		{
 			var view = PhotonNetwork.GetPhotonView(viewID);
 			if (view.IsMine)
 			{
 				bool isBlocking = view.GetComponent<Block>().IsBlocking();
 				NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AnswerIsBlocking), askerID, viewID, isBlocking);
+				PhotonNetwork.SendAllOutgoingCommands();
 			}
 		}
 
 		[UnboundRPC]
-		static void RPC_AnswerIsBlocking(int askerID, int viewID, bool isBlocking)
+		private static void RPC_AnswerIsBlocking(int askerID, int viewID, bool isBlocking)
 		{
-			var view = PhotonNetwork.GetPhotonView(askerID);
-			if (view.IsMine)
+			if (PhotonNetwork.GetPhotonView(askerID).IsMine)
 			{
 				s_isBlockingAnswered[viewID] = true;
 				s_isBlocking[viewID] = isBlocking;
