@@ -6,6 +6,8 @@ Makes blocking more consistent in online play by syncing block messages more agg
 
 When a player blocks, they notify other players immediately. However, there is some delay until the message gets to its destinations, resulting in a window where a player who blocked can still get hit by a bullet if its shooter didn't receive the message soon enough. This mod offers two solutions to the problem.
 
+The strategy can be chosen from the mod's option menu.
+
 ### Optimistic syncing (default)
 
 Since we can assume that information about each block will arrive as soon as possible, then theoretically we just need to wait until it does before we decide whether to apply damage or to reflect a bullet. Problem is, we don't know _when_ the information is coming exactly, and we can't wait forever.
