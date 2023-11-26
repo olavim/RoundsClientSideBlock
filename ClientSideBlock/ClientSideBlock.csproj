@@ -2,12 +2,13 @@
 	<Import Project="..\RoundsReferences.props" />
 
 	<PropertyGroup>
-		<Version>1.0.2</Version>
+		<Version>1.1.0</Version>
 		<TargetFramework>net472</TargetFramework>
 		<AssemblyName>ClientSideBlock</AssemblyName>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<PackageReference Include="MMHOOK.Rounds" Version="1.0.0" IncludeAssets="compile" />
 		<PackageReference Include="UnboundLib" Version="3.2.10" IncludeAssets="compile" />
 		<PackageReference Include="ThisAssembly.Project" Version="1.0.0" />
 		<ProjectProperty Include="Version" />

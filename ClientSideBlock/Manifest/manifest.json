@@ -1,6 +1,6 @@
 {
 	"name": "ClientSideBlock",
-	"description": "Makes the blocker determine if a bullet was blocked or not",
+	"description": "Makes blocking more consistent in online play",
 	"version_number": "#VERSION#",
 	"dependencies": [
 		"BepInEx-BepInExPack_ROUNDS-5.4.1100",

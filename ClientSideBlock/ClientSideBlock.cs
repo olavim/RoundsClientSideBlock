@@ -1,12 +1,12 @@
 ﻿using BepInEx;
+using BepInEx.Configuration;
 using HarmonyLib;
 using Photon.Pun;
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
+using TMPro;
 using UnboundLib;
 using UnboundLib.Networking;
+using UnboundLib.Utils.UI;
 using UnityEngine;
 
 namespace ClientSideBlock
@@ -16,7 +16,19 @@ namespace ClientSideBlock
 	{
 		public const string ModId = "io.olavim.rounds.clientsideblock";
 		public const string ModName = "ClientSideBlock";
+		public const string ModNameUI = "Client Side Block";
 		public const string ModVersion = ThisAssembly.Project.Version;
+
+		internal const int OptimisticSyncAdditionalDelay = 10;
+
+		private static ConfigEntry<bool> s_optimisticSyncEnabledConfig { get; set; }
+
+		private static readonly string[] OptimisticSyncDescription = {
+			"Enable to make damaging and blocking feel more responsive for the shooter.",
+			"Disable if players have highly fluctuating ping and you experience issues with blocking."
+		};
+
+		internal static bool OptimisticSyncEnabled { get; set; }
 
 		internal static ClientSideBlock Instance { get; private set; }
 
@@ -26,103 +38,90 @@ namespace ClientSideBlock
 
 			var harmony = new Harmony(ModId);
 			harmony.PatchAll();
-		}
-	}
 
-	[HarmonyPatch(typeof(ProjectileHit))]
-	internal static class ProjectileHitPatch
-	{
-		private class ProjectileHitExtraData
-		{
-			public bool HitPending { get; set; } = false;
-		}
-		private static readonly ConditionalWeakTable<ProjectileHit, ProjectileHitExtraData> s_extraData = new();
-		private static readonly Dictionary<int, bool> s_isBlockingAnswered = new();
-		private static readonly Dictionary<int, bool> s_isBlocking = new();
+			s_optimisticSyncEnabledConfig = this.Config.Bind(ModName, "optimisticSyncing", true, string.Join(" ", OptimisticSyncDescription));
 
-		[HarmonyPatch("Hit")]
-		[HarmonyPrefix]
-		private static bool HitPrefix(ProjectileHit __instance, MoveTransform ___move, List<HealthHandler> ___playersHit, HitInfo hit, bool forceCall)
-		{
-			var hitData = s_extraData.GetOrCreateValue(__instance);
-			if (!hitData.HitPending)
+			On.MainMenuHandler.Awake += (orig, self) =>
 			{
-				hitData.HitPending = true;
-				ClientSideBlock.Instance.StartCoroutine(HitCoroutine(__instance, ___move, ___playersHit, hit, forceCall));
+				orig(self);
+				OptimisticSyncEnabled = s_optimisticSyncEnabledConfig.Value;
+			};
+		}
+
+		private void Start()
+		{
+			Unbound.RegisterMenu(ModNameUI, () => { }, this.BuildSettingsGUI, null, false);
+			Unbound.RegisterHandshake(ModId, this.OnHandShakeCompleted);
+		}
+
+		private void BuildSettingsGUI(GameObject menu)
+		{
+			MenuHandler.CreateText(ModNameUI, menu, out TextMeshProUGUI _, 60);
+			MenuHandler.CreateText(" ", menu, out TextMeshProUGUI _, 24);
+
+			MenuHandler.CreateText("Optimistic Syncing", menu, out TextMeshProUGUI _, 40, false);
+			MenuHandler.CreateText(OptimisticSyncDescription[0], menu, out TextMeshProUGUI _, 24, false);
+			MenuHandler.CreateText(OptimisticSyncDescription[1], menu, out TextMeshProUGUI _, 24, false);
+			MenuHandler.CreateToggle(s_optimisticSyncEnabledConfig.Value, "Enable", menu, value => { s_optimisticSyncEnabledConfig.Value = value; OptimisticSyncEnabled = value; }, 30, false);
+		}
+
+		private void OnHandShakeCompleted()
+		{
+			if (PhotonNetwork.IsMasterClient)
+			{
+				NetworkingManager.RPC_Others(typeof(ClientSideBlock), nameof(SyncSettings), new object[] { OptimisticSyncEnabled });
 			}
-
-			return false;
 		}
 
-		private static IEnumerator HitCoroutine(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
+		[UnboundRPC]
+		private static void SyncSettings(bool optimisticSyncEnabled)
 		{
-			yield return DoHit(hit, move, playersHit, hitInfo, forceCall);
-			s_extraData.GetOrCreateValue(hit).HitPending = false;
+			OptimisticSyncEnabled = optimisticSyncEnabled;
 		}
 
-		private static IEnumerator DoHit(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
+		internal static IEnumerator GetTargetBlocked(ProjectileHit hit, int targetViewId)
 		{
-			var healthHandler = hitInfo.transform?.GetComponent<HealthHandler>();
-			if (healthHandler && playersHit.Contains(healthHandler))
+			return ClientSideBlock.OptimisticSyncEnabled
+				? GetTargetBlockedOptimistic(hit, targetViewId)
+				: GetTargetBlockedPessimistic(hit, targetViewId);
+		}
+
+		// Assume that if the target blocked, the information will arrive within about half the shooter's and target's ping
+		private static IEnumerator GetTargetBlockedOptimistic(ProjectileHit hit, int targetViewId)
+		{
+			var targetView = PhotonNetwork.GetPhotonView(targetViewId);
+
+			if (targetView.IsMine)
 			{
+				hit.GetExtraData().IsBlockingAnswered[targetViewId] = true;
+				hit.GetExtraData().IsBlocking[targetViewId] = targetView.GetComponent<Block>().IsBlocking();
 				yield break;
 			}
 
-			bool wasBlocked = false;
-			var hitVelocity = (Vector2) move.velocity;
+			hit.GetExtraData().IsBlockingAnswered[targetViewId] = false;
+			hit.gameObject.SetActive(false);
 
-			int targetViewID = hitInfo.transform?.root.GetComponent<PhotonView>()?.ViewID ?? -1;
-			int targetColliderIdx = -1;
+			int myPing = (int) PhotonNetwork.LocalPlayer.CustomProperties["Ping"];
+			int targetPing = (int) targetView.Owner.CustomProperties["Ping"];
+			float delayToTarget = (myPing + targetPing) / 2f;
 
-			if (targetViewID == -1)
-			{
-				var colliders = MapManager.instance.currentMap.Map.GetComponentsInChildren<Collider2D>();
-				targetColliderIdx = Array.FindIndex(colliders, c => c == hitInfo.collider);
-			}
+			yield return new WaitForSeconds((delayToTarget + ClientSideBlock.OptimisticSyncAdditionalDelay) / 1000f);
 
-			if (healthHandler)
-			{
-				if (hit.view.IsMine)
-				{
-					yield return GetTargetBlocked(hit, targetViewID);
-					wasBlocked = s_isBlocking[targetViewID];
-				}
-
-				hit.AddPlayerToHeld(healthHandler);
-			}
-
-			if (!hit.view.IsMine && !forceCall)
-			{
-				yield break;
-			}
-
-			if (hit.sendCollisions)
-			{
-				hit.view.RPC("RPCA_DoHit", RpcTarget.All, new object[]
-				{
-						hitInfo.point,
-						hitInfo.normal,
-						hitVelocity,
-						targetViewID,
-						targetColliderIdx,
-						wasBlocked
-				});
-				PhotonNetwork.SendAllOutgoingCommands();
-				yield break;
-			}
-
-			hit.RPCA_DoHit(hitInfo.point, hitInfo.normal, hitVelocity, targetViewID, targetColliderIdx, wasBlocked);
+			hit.GetExtraData().IsBlockingAnswered[targetViewId] = true;
+			hit.GetExtraData().IsBlocking[targetViewId] = targetView.GetComponent<Block>().IsBlocking();
+			hit.gameObject.SetActive(true);
 		}
 
-		private static IEnumerator GetTargetBlocked(ProjectileHit hit, int targetViewID)
+		// Ask the target if it's blocking and wait for the answer
+		private static IEnumerator GetTargetBlockedPessimistic(ProjectileHit hit, int targetViewId)
 		{
 			hit.gameObject.SetActive(false);
-			s_isBlockingAnswered[targetViewID] = false;
+			hit.GetExtraData().IsBlockingAnswered[targetViewId] = false;
 
-			NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AskIsBlocking), hit.view.ViewID, targetViewID);
+			NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AskIsBlocking), hit.view.ViewID, targetViewId);
 			PhotonNetwork.SendAllOutgoingCommands();
 
-			while (!s_isBlockingAnswered[targetViewID])
+			while (!hit.GetExtraData().IsBlockingAnswered[targetViewId])
 			{
 				yield return null;
 			}
@@ -131,24 +130,26 @@ namespace ClientSideBlock
 		}
 
 		[UnboundRPC]
-		private static void RPC_AskIsBlocking(int askerID, int viewID)
+		private static void RPC_AskIsBlocking(int projectileViewId, int targetViewId)
 		{
-			var view = PhotonNetwork.GetPhotonView(viewID);
+			var view = PhotonNetwork.GetPhotonView(targetViewId);
 			if (view.IsMine)
 			{
 				bool isBlocking = view.GetComponent<Block>().IsBlocking();
-				NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AnswerIsBlocking), askerID, viewID, isBlocking);
+				NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AnswerIsBlocking), projectileViewId, targetViewId, isBlocking);
 				PhotonNetwork.SendAllOutgoingCommands();
 			}
 		}
 
 		[UnboundRPC]
-		private static void RPC_AnswerIsBlocking(int askerID, int viewID, bool isBlocking)
+		private static void RPC_AnswerIsBlocking(int projectileViewId, int targetViewId, bool isBlocking)
 		{
-			if (PhotonNetwork.GetPhotonView(askerID).IsMine)
+			var view = PhotonNetwork.GetPhotonView(projectileViewId);
+			if (view.IsMine)
 			{
-				s_isBlockingAnswered[viewID] = true;
-				s_isBlocking[viewID] = isBlocking;
+				var hit = view.GetComponent<ProjectileHit>();
+				hit.GetExtraData().IsBlockingAnswered[targetViewId] = true;
+				hit.GetExtraData().IsBlocking[targetViewId] = isBlocking;
 			}
 		}
 	}
