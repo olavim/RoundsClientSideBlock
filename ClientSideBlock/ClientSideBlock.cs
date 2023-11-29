@@ -99,7 +99,6 @@ namespace ClientSideBlock
 			}
 
 			hit.GetExtraData().IsBlockingAnswered[targetViewId] = false;
-			hit.gameObject.SetActive(false);
 
 			int myPing = (int) PhotonNetwork.LocalPlayer.CustomProperties["Ping"];
 			int targetPing = (int) targetView.Owner.CustomProperties["Ping"];
@@ -109,24 +108,20 @@ namespace ClientSideBlock
 
 			hit.GetExtraData().IsBlockingAnswered[targetViewId] = true;
 			hit.GetExtraData().IsBlocking[targetViewId] = targetView.GetComponent<Block>().IsBlocking();
-			hit.gameObject.SetActive(true);
 		}
 
 		// Ask the target if it's blocking and wait for the answer
 		private static IEnumerator GetTargetBlockedPessimistic(ProjectileHit hit, int targetViewId)
 		{
-			hit.gameObject.SetActive(false);
 			hit.GetExtraData().IsBlockingAnswered[targetViewId] = false;
 
-			NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AskIsBlocking), hit.view.ViewID, targetViewId);
+			NetworkingManager.RPC(typeof(ClientSideBlock), nameof(RPC_AskIsBlocking), hit.view.ViewID, targetViewId);
 			PhotonNetwork.SendAllOutgoingCommands();
 
 			while (!hit.GetExtraData().IsBlockingAnswered[targetViewId])
 			{
 				yield return null;
 			}
-
-			hit.gameObject.SetActive(true);
 		}
 
 		[UnboundRPC]
@@ -136,7 +131,7 @@ namespace ClientSideBlock
 			if (view.IsMine)
 			{
 				bool isBlocking = view.GetComponent<Block>().IsBlocking();
-				NetworkingManager.RPC(typeof(ProjectileHitPatch), nameof(RPC_AnswerIsBlocking), projectileViewId, targetViewId, isBlocking);
+				NetworkingManager.RPC(typeof(ClientSideBlock), nameof(RPC_AnswerIsBlocking), projectileViewId, targetViewId, isBlocking);
 				PhotonNetwork.SendAllOutgoingCommands();
 			}
 		}

@@ -53,8 +53,14 @@ namespace ClientSideBlock
 			{
 				if (hit.view.IsMine)
 				{
+					move.velocity = Vector2.zero;
+					hit.gameObject.SetActive(false);
+
 					yield return ClientSideBlock.GetTargetBlocked(hit, targetViewId);
 					wasBlocked = hit.GetExtraData().IsBlocking[targetViewId];
+
+					hit.gameObject.SetActive(true);
+					move.velocity = hitVelocity;
 				}
 
 				hit.AddPlayerToHeld(healthHandler);
