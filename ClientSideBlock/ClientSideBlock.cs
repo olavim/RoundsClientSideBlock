@@ -2,12 +2,14 @@
 using BepInEx.Configuration;
 using HarmonyLib;
 using Photon.Pun;
+using System;
 using System.Collections;
 using TMPro;
 using UnboundLib;
 using UnboundLib.Networking;
 using UnboundLib.Utils.UI;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace ClientSideBlock
 {
@@ -19,7 +21,7 @@ namespace ClientSideBlock
 		public const string ModNameUI = "Client Side Block";
 		public const string ModVersion = ThisAssembly.Project.Version;
 
-		internal const int OptimisticSyncAdditionalDelay = 10;
+		internal const int OptimisticSyncAdditionalDelay = 20;
 
 		private static ConfigEntry<bool> s_optimisticSyncEnabledConfig { get; set; }
 

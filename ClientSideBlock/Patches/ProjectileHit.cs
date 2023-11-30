@@ -25,20 +25,20 @@ namespace ClientSideBlock
 
 		private static IEnumerator HitCoroutine(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
 		{
-			yield return DoHit(hit, move, playersHit, hitInfo, forceCall);
-			hit.GetExtraData().HitPending = false;
-		}
-
-		private static IEnumerator DoHit(ProjectileHit hit, MoveTransform move, List<HealthHandler> playersHit, HitInfo hitInfo, bool forceCall)
-		{
 			var healthHandler = hitInfo.transform?.GetComponent<HealthHandler>();
 			if (healthHandler && playersHit.Contains(healthHandler))
 			{
+				hit.GetExtraData().HitPending = false;
 				yield break;
 			}
 
 			bool wasBlocked = false;
-			var hitVelocity = (Vector2) move.velocity;
+			var origVelocity = (Vector2) move.velocity;
+
+			if (hit.view.IsMine)
+			{
+				move.velocity = Vector2.zero;
+			}
 
 			int targetViewId = hitInfo.transform?.root.GetComponent<PhotonView>()?.ViewID ?? -1;
 			int targetColliderIdx = -1;
@@ -53,14 +53,12 @@ namespace ClientSideBlock
 			{
 				if (hit.view.IsMine)
 				{
-					move.velocity = Vector2.zero;
 					hit.gameObject.SetActive(false);
 
 					yield return ClientSideBlock.GetTargetBlocked(hit, targetViewId);
 					wasBlocked = hit.GetExtraData().IsBlocking[targetViewId];
 
 					hit.gameObject.SetActive(true);
-					move.velocity = hitVelocity;
 				}
 
 				hit.AddPlayerToHeld(healthHandler);
@@ -68,6 +66,7 @@ namespace ClientSideBlock
 
 			if (!hit.view.IsMine && !forceCall)
 			{
+				hit.GetExtraData().HitPending = false;
 				yield break;
 			}
 
@@ -77,7 +76,7 @@ namespace ClientSideBlock
 				{
 						hitInfo.point,
 						hitInfo.normal,
-						hitVelocity,
+						origVelocity,
 						targetViewId,
 						targetColliderIdx,
 						wasBlocked
@@ -86,7 +85,14 @@ namespace ClientSideBlock
 				yield break;
 			}
 
-			hit.RPCA_DoHit(hitInfo.point, hitInfo.normal, hitVelocity, targetViewId, targetColliderIdx, wasBlocked);
+			hit.RPCA_DoHit(hitInfo.point, hitInfo.normal, origVelocity, targetViewId, targetColliderIdx, wasBlocked);
+		}
+
+		[HarmonyPatch("RPCA_DoHit")]
+		[HarmonyPostfix]
+		private static void DoHitPostfix(ProjectileHit __instance)
+		{
+			__instance.GetExtraData().HitPending = false;
 		}
 	}
 }
