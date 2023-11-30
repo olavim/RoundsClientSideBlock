@@ -9,8 +9,8 @@ $bepinexDir = $config.Project.PropertyGroup.BepInExDir
 
 Import-Module .\tools\WindowUtils.psm1
 
-function Start-Game([System.Int32]$Monitor) {
-	$process = Start-Process "$roundsDir\Rounds.exe" -PassThru -ArgumentList "-- --doorstop-enable true --doorstop-target-assembly ""$bepinexDir\core\BepInEx.Preloader.dll"""
+function Start-Game([System.Int32]$Monitor, [System.String]$Arguments) {
+	$process = Start-Process "$roundsDir\Rounds.exe" -PassThru -ArgumentList "$Arguments -- --doorstop-enable true --doorstop-target-assembly ""$bepinexDir\core\BepInEx.Preloader.dll"""
 	Start-Sleep -Seconds 1
 
 	$consoleWindow = $process.MainWindowHandle
@@ -26,15 +26,19 @@ function Start-Game([System.Int32]$Monitor) {
 }
 
 try {
-	$process = Start-Game -Monitor 0
+	$process1 = Start-Game -Monitor 1 -Arguments "-autoHost eu:1234"
+	Start-Sleep -Seconds 2
+	$process2 = Start-Game -Monitor 0 -Arguments "-autoConnect eu:1234"
 
-	while ($process.HasExited -eq $false) {
+	while ($process1.HasExited -eq $false -and $process2.HasExited -eq $false) {
 		Start-Sleep -Milliseconds 100
 	}
 }
 finally {
-	if (-not ($process -eq $null) -and -not $process.HasExited) {
-		Stop-Process -Id $process.Id
+	$process1, $process2 | ForEach-Object {
+		if (-not ($_ -eq $null) -and -not $_.HasExited) {
+			Stop-Process -Id $_.Id
+		}
 	}
 
 	Pop-Location
